@@ -54,6 +54,90 @@ brew install --cask voiceink
 ### Build from Source
 As an open-source project, you can build VoiceInk yourself by following the instructions in [BUILDING.md](BUILDING.md). However, the compiled version includes additional benefits like automatic updates, priority support via Discord and email, and helps fund ongoing development.
 
+## Using VoiceInk with Ollama (Local LLM)
+
+VoiceInk supports local LLM processing using Ollama, providing 100% offline AI enhancement without sending data to external services.
+
+### Prerequisites
+
+- macOS 14.0 or later
+- Ollama installed and running
+
+### Installation
+
+1. **Install Ollama**:
+   ```bash
+   brew install ollama
+   ```
+   
+   Or download from [ollama.ai](https://ollama.ai)
+
+2. **Start Ollama service**:
+   ```bash
+   ollama serve
+   ```
+   
+   Ollama will run on `http://localhost:11434` by default.
+
+3. **Pull recommended models**:
+   ```bash
+   # Balanced performance (recommended)
+   ollama pull llama3.1:8b
+   
+   # Fast and lightweight
+   ollama pull mistral:7b
+   
+   # Larger, more capable
+   ollama pull llama3.1:70b
+   ```
+
+### Configuration
+
+1. Open VoiceInk Settings
+2. Navigate to **AI Enhancement** section
+3. Select **Ollama** as the AI Provider
+4. Choose your preferred model from the dropdown
+5. (Optional) Customize Ollama base URL if not using default
+
+### Troubleshooting
+
+**Ollama not connecting**:
+- Ensure Ollama service is running: `ollama serve`
+- Check if Ollama is accessible: `curl http://localhost:11434`
+- Verify firewall settings allow localhost connections
+
+**Model not found**:
+- List available models: `ollama list`
+- Pull the model: `ollama pull <model-name>`
+- Refresh models in VoiceInk settings
+
+**Port conflicts**:
+- Change Ollama port: `OLLAMA_HOST=0.0.0.0:11435 ollama serve`
+- Update base URL in VoiceInk settings to match
+
+**Performance issues**:
+- Use smaller models (7B-8B parameters) for faster responses
+- Ensure sufficient RAM (8GB minimum, 16GB recommended)
+- Close other resource-intensive applications
+
+### Recommended Models
+
+| Model | Size | Speed | Quality | Use Case |
+|-------|------|-------|---------|----------|
+| `llama3.1:8b` | ~4.7GB | Fast | High | General use (recommended) |
+| `mistral:7b` | ~4.1GB | Very Fast | Good | Quick transcription enhancement |
+| `llama3.1:70b` | ~40GB | Slow | Excellent | Maximum quality (requires 64GB+ RAM) |
+| `phi3:mini` | ~2.3GB | Very Fast | Good | Low-resource systems |
+
+### Privacy Benefits
+
+When using Ollama:
+- ✅ 100% offline processing
+- ✅ No data sent to external servers
+- ✅ No API keys required
+- ✅ Complete privacy and security
+- ✅ No usage limits or costs
+
 ## Requirements
 
 - macOS 14.0 or later

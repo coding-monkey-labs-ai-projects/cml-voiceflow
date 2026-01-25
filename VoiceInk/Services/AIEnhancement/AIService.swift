@@ -192,7 +192,9 @@ class AIService: ObservableObject {
     
     @Published private var selectedModels: [AIProvider: String] = [:]
     private let userDefaults = UserDefaults.standard
-    private lazy var ollamaService = OllamaService()
+    
+    // Expose ollamaService for LLM client factory
+    lazy var ollamaService = OllamaService()
     
     @Published private var openRouterModels: [String] = []
     

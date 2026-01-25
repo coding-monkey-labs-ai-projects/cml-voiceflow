@@ -209,136 +209,53 @@ class AIEnhancementService: ObservableObject {
             self.lastUserMessageSent = formattedText
         }
 
-        if aiService.selectedProvider == .ollama {
-            do {
-                let result = try await aiService.enhanceWithOllama(text: formattedText, systemPrompt: systemMessage)
-                let filteredResult = AIEnhancementOutputFilter.filter(result)
-                return filteredResult
-            } catch {
-                if let localError = error as? LocalAIError {
-                    throw EnhancementError.customError(localError.errorDescription ?? "An unknown Ollama error occurred.")
-                } else {
-                    throw EnhancementError.customError(error.localizedDescription)
-                }
-            }
+        // Use LLM client abstraction for all providers
+        guard let client = LLMClientFactory.createClient(
+            provider: aiService.selectedProvider,
+            aiService: aiService,
+            ollamaService: aiService.ollamaService
+        ) else {
+            throw EnhancementError.customError("Unsupported AI provider: \(aiService.selectedProvider.rawValue)")
         }
-
-        try await waitForRateLimit()
-
-        switch aiService.selectedProvider {
-        case .anthropic:
-            let requestBody: [String: Any] = [
-                "model": aiService.currentModel,
-                "max_tokens": 8192,
-                "system": systemMessage,
-                "messages": [
-                    ["role": "user", "content": formattedText]
-                ]
-            ]
-
-            var request = URLRequest(url: URL(string: aiService.selectedProvider.baseURL)!)
-            request.httpMethod = "POST"
-            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.addValue(aiService.apiKey, forHTTPHeaderField: "x-api-key")
-            request.addValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-            request.timeoutInterval = baseTimeout
-            request.httpBody = try? JSONSerialization.data(withJSONObject: requestBody)
-
-            do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    throw EnhancementError.invalidResponse
-                }
-
-                if httpResponse.statusCode == 200 {
-                    guard let jsonResponse = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          let content = jsonResponse["content"] as? [[String: Any]],
-                          let firstContent = content.first,
-                          let enhancedText = firstContent["text"] as? String else {
-                        throw EnhancementError.enhancementFailed
-                    }
-
-                    let filteredText = AIEnhancementOutputFilter.filter(enhancedText.trimmingCharacters(in: .whitespacesAndNewlines))
-                    return filteredText
-                } else if httpResponse.statusCode == 429 {
-                    throw EnhancementError.rateLimitExceeded
-                } else if (500...599).contains(httpResponse.statusCode) {
-                    throw EnhancementError.serverError
-                } else {
-                    let errorString = String(data: data, encoding: .utf8) ?? "Could not decode error response."
-                    throw EnhancementError.customError("HTTP \(httpResponse.statusCode): \(errorString)")
-                }
-
-            } catch let error as EnhancementError {
-                throw error
-            } catch let error as URLError {
-                throw error
-            } catch {
-                throw EnhancementError.customError(error.localizedDescription)
+        
+        // Apply rate limiting for non-Ollama providers
+        if aiService.selectedProvider != .ollama {
+            try await waitForRateLimit()
+        }
+        
+        do {
+            // Determine temperature based on model
+            let temperature = aiService.currentModel.lowercased().hasPrefix("gpt-5") ? 1.0 : 0.3
+            
+            let result = try await client.generate(
+                userMessage: formattedText,
+                systemMessage: systemMessage,
+                model: aiService.currentModel,
+                temperature: temperature
+            )
+            
+            // Apply output filtering
+            let filteredResult = AIEnhancementOutputFilter.filter(result)
+            return filteredResult
+            
+        } catch let error as LLMClientError {
+            // Map LLMClientError to EnhancementError
+            switch error {
+            case .notConfigured:
+                throw EnhancementError.notConfigured
+            case .invalidResponse:
+                throw EnhancementError.invalidResponse
+            case .networkError:
+                throw EnhancementError.networkError
+            case .serverError:
+                throw EnhancementError.serverError
+            case .rateLimitExceeded:
+                throw EnhancementError.rateLimitExceeded
+            case .customError(let message):
+                throw EnhancementError.customError(message)
             }
-
-        default:
-            let url = URL(string: aiService.selectedProvider.baseURL)!
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.addValue("Bearer \(aiService.apiKey)", forHTTPHeaderField: "Authorization")
-            request.timeoutInterval = baseTimeout
-
-            let messages: [[String: Any]] = [
-                ["role": "system", "content": systemMessage],
-                ["role": "user", "content": formattedText]
-            ]
-
-            var requestBody: [String: Any] = [
-                "model": aiService.currentModel,
-                "messages": messages,
-                "temperature": aiService.currentModel.lowercased().hasPrefix("gpt-5") ? 1.0 : 0.3,
-                "stream": false
-            ]
-
-            // Add reasoning_effort parameter if the model supports it
-            if let reasoningEffort = ReasoningConfig.getReasoningParameter(for: aiService.currentModel) {
-                requestBody["reasoning_effort"] = reasoningEffort
-            }
-
-            request.httpBody = try? JSONSerialization.data(withJSONObject: requestBody)
-
-            do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    throw EnhancementError.invalidResponse
-                }
-
-                if httpResponse.statusCode == 200 {
-                    guard let jsonResponse = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          let choices = jsonResponse["choices"] as? [[String: Any]],
-                          let firstChoice = choices.first,
-                          let message = firstChoice["message"] as? [String: Any],
-                          let enhancedText = message["content"] as? String else {
-                        throw EnhancementError.enhancementFailed
-                    }
-
-                    let filteredText = AIEnhancementOutputFilter.filter(enhancedText.trimmingCharacters(in: .whitespacesAndNewlines))
-                    return filteredText
-                } else if httpResponse.statusCode == 429 {
-                    throw EnhancementError.rateLimitExceeded
-                } else if (500...599).contains(httpResponse.statusCode) {
-                    throw EnhancementError.serverError
-                } else {
-                    let errorString = String(data: data, encoding: .utf8) ?? "Could not decode error response."
-                    throw EnhancementError.customError("HTTP \(httpResponse.statusCode): \(errorString)")
-                }
-
-            } catch let error as EnhancementError {
-                throw error
-            } catch let error as URLError {
-                throw error
-            } catch {
-                throw EnhancementError.customError(error.localizedDescription)
-            }
+        } catch {
+            throw EnhancementError.customError(error.localizedDescription)
         }
     }
 
